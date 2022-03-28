@@ -69,12 +69,23 @@ int main(int argc, char *argv[])
             char recv_buffer[MESSAGE_SIZE_MAX];
             struct task *my_task;
             unsigned char classification;
-
+            // Create mq attributes following specification
+            struct mq_attr attributes;
+            attributes.mq_flags = O_NONBLOCK;
+            attributes.mq_maxmsg = 1000;
+            attributes.mq_msgsize = MESSAGE_SIZE_MAX;
+            attributes.mq_curmsgs = 0;
             // Here you need to create/open the two message queues for the
             // worker process. You must use the tasks_mqd and results_mqd
             // variables for this purpose
-
-
+            if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+                printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+                return 1;
+            }
+            if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+                printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+                return 1;
+            }
             // At this point, the queues must be open
 #ifdef GRADING // do not delete this or you will lose points
             test_mqdes(tasks_mqd, "Tasks", getpid());
@@ -144,7 +155,8 @@ int main(int argc, char *argv[])
 #endif
 
                         // implement the terminate task logic here
-
+                        mq_close(tasks_mqd);
+                        mq_close(results_mqd);
                         exit(0);
                 }
             }
