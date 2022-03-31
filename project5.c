@@ -3,7 +3,6 @@
 Team: 07 
 Names: Nic Plybon and Adrien Ponce 
 Honor code statement: This code complies with the JMU Honor Code.
-
 */
 
 #include <stdio.h>
@@ -32,6 +31,12 @@ int main(int argc, char *argv[])
     char tasks_mq_name[16]; // name of the tasks queue
     char results_mq_name[18];   // name of the results queue
     int num_clusters;
+    // Create mq attributes following specification
+    struct mq_attr attributes;
+    attributes.mq_flags = O_NONBLOCK;
+    attributes.mq_maxmsg = 1000;
+    attributes.mq_msgsize = MESSAGE_SIZE_MAX;
+    attributes.mq_curmsgs = 0;
 
     if (argc != 2) {
         printf("Usage: %s data_file\n", argv[0]);
@@ -69,12 +74,7 @@ int main(int argc, char *argv[])
             char recv_buffer[MESSAGE_SIZE_MAX];
             struct task *my_task;
             unsigned char classification;
-            // Create mq attributes following specification
-            struct mq_attr attributes;
-            attributes.mq_flags = O_NONBLOCK;
-            attributes.mq_maxmsg = 1000;
-            attributes.mq_msgsize = MESSAGE_SIZE_MAX;
-            attributes.mq_curmsgs = 0;
+           
             // Here you need to create/open the two message queues for the
             // worker process. You must use the tasks_mqd and results_mqd
             // variables for this purpose
@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
                 return 1;
             }
             if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
-                printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+                printf("Error opening message queue %s: %s\n", results_mq_name, strerror(errno));
                 return 1;
             }
             // At this point, the queues must be open
@@ -96,7 +96,7 @@ int main(int argc, char *argv[])
             // A worker process must endlessly receive new tasks
             // until instructed to terminate
             while(1) {
-
+        
                 // receive the next task message here; you must read into recv_buffer
 
                 // cast the received message to a struct task
@@ -155,8 +155,6 @@ int main(int argc, char *argv[])
 #endif
 
                         // implement the terminate task logic here
-                        mq_close(tasks_mqd);
-                        mq_close(results_mqd);
                         exit(0);
                 }
             }
@@ -175,6 +173,14 @@ int main(int argc, char *argv[])
     // Here you need to create/open the two message queues for the
     // supervisor process. You must use the tasks_mqd and results_mqd
     // variables for this purpose
+    if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT | O_NONBLOCK, 0600, &attributes)) < 0) {
+        printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+        return 1;
+    }
+    if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+        printf("Error opening message queue %s: %s\n", results_mq_name, strerror(errno));
+        return 1;
+    }
 
     // At this point, the queues must be open
 #ifdef GRADING // do not delete this or you will lose points
@@ -183,6 +189,8 @@ int main(int argc, char *argv[])
 #endif
 
     // Implement Phase 1 here
+
+    
 
     // End of Phase 1
 
