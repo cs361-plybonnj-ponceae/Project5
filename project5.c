@@ -103,8 +103,6 @@ int main(int argc, char *argv[])
                     return 1;
                 }
                     
-                
-
                 // cast the received message to a struct task
                 my_task = (struct task *)recv_buffer;
                 switch (my_task->task_type) {
@@ -151,7 +149,7 @@ int main(int argc, char *argv[])
                         result.res_cluster_type = classification;
 
                         // send it to results queue
-                        if (mq_send(results_mqd, result, sizeof(result), 0) < 0) {
+                        if (mq_send(results_mqd, (const char *) &result, sizeof(result), 0) < 0) {
                             printf("Error sending to results queue: %s\n", strerror(errno));
                             return 1;
                         }
