@@ -98,6 +98,12 @@ int main(int argc, char *argv[])
             while(1) {
         
                 // receive the next task message here; you must read into recv_buffer
+                if (mq_receive(tasks_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
+                    printf("Error receiving message from %s: %s\n", tasks_mq_name, strerror(errno));
+                    return 1;
+                }
+                    
+                
 
                 // cast the received message to a struct task
                 my_task = (struct task *)recv_buffer;
@@ -111,6 +117,12 @@ int main(int argc, char *argv[])
                         // you must retrieve the data for the specified cluster
                         // and store it in cluster_data before executing the
                         // code below
+
+                        // seek to the specified cluster in the input file
+                        lseek(input_fd, my_task->task_cluster, SEEK_SET);
+
+                        // read the cluster data 
+                        read(input_fd, &cluster_data, CLUSTER_SIZE);
 
                         // Classification code
                         classification = TYPE_UNCLASSIFIED;
@@ -133,9 +145,16 @@ int main(int argc, char *argv[])
                         if (classification == TYPE_UNCLASSIFIED)
                             classification = TYPE_UNKNOWN;
 
-                        // prepare a results message and send it to results
-                        // queue here
+                        // generate the classification message (struct result) and send to result queue
+                        struct result result;
+                        result.res_cluster_number = my_task->task_cluster;
+                        result.res_cluster_type = classification;
 
+                        // send it to results queue
+                        if (mq_send(results_mqd, result, sizeof(result), 0) < 0) {
+                            printf("Error sending to results queue: %s\n", strerror(errno));
+                            return 1;
+                        }
                         break;
 
                     case TASK_MAP:
@@ -189,6 +208,7 @@ int main(int argc, char *argv[])
 #endif
 
     // Implement Phase 1 here
+
 
     
 
