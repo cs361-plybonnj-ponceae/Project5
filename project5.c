@@ -14,6 +14,8 @@ Honor code statement: This code complies with the JMU Honor Code.
 #include <unistd.h>
 #include <stdlib.h>
 #include <mqueue.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "common.h"
 #include "classify.h"
@@ -78,7 +80,7 @@ int main(int argc, char *argv[])
             // Here you need to create/open the two message queues for the
             // worker process. You must use the tasks_mqd and results_mqd
             // variables for this purpose
-            if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+            if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT | O_NONBLOCK, 0600, &attributes)) < 0) {
                 printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
                 return 1;
             }
@@ -91,24 +93,18 @@ int main(int argc, char *argv[])
             test_mqdes(tasks_mqd, "Tasks", getpid());
             test_mqdes(results_mqd, "Results", getpid());
 #endif
-
-
             // A worker process must endlessly receive new tasks
             // until instructed to terminate
-            while(1) {
-        
+            while(1) { 
                 // receive the next task message here; you must read into recv_buffer
                 if (mq_receive(tasks_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
                     printf("Error receiving message from %s: %s\n", tasks_mq_name, strerror(errno));
                     return 1;
-                }
-                    
+                }      
                 // cast the received message to a struct task
                 my_task = (struct task *)recv_buffer;
                 switch (my_task->task_type) {
-
                     case TASK_CLASSIFY:
-
 #ifdef GRADING // do not delete this or you will lose points
                         printf("(%d): received TASK_CLASSIFY\n", getpid());
 #endif
@@ -117,7 +113,7 @@ int main(int argc, char *argv[])
                         // code below
 
                         // seek to the specified cluster in the input file
-                        lseek(input_fd, my_task->task_cluster, SEEK_SET);
+                        lseek(input_fd, CLUSTER_SIZE, SEEK_CUR);
 
                         // read the cluster data 
                         read(input_fd, &cluster_data, CLUSTER_SIZE);
@@ -147,7 +143,7 @@ int main(int argc, char *argv[])
                         struct result result;
                         result.res_cluster_number = my_task->task_cluster;
                         result.res_cluster_type = classification;
-
+                        printf("cluster number:%d cluster type:%d\n", result.res_cluster_number, result.res_cluster_type);
                         // send it to results queue
                         if (mq_send(results_mqd, (const char *) &result, sizeof(result), 0) < 0) {
                             printf("Error sending to results queue: %s\n", strerror(errno));
@@ -163,6 +159,7 @@ int main(int argc, char *argv[])
 
                         // implement the map task logic here
 
+
                         break;
 
                     default:
@@ -170,8 +167,11 @@ int main(int argc, char *argv[])
 #ifdef GRADING // do not delete this or you will lose points
                         printf("(%d): received TASK_TERMINATE or invalid task\n", getpid());
 #endif
-
                         // implement the terminate task logic here
+                        mq_close(tasks_mqd);
+                        mq_close(results_mqd);
+                        printf("TERMINATE\n");
+
                         exit(0);
                 }
             }
@@ -204,9 +204,25 @@ int main(int argc, char *argv[])
     test_mqdes(tasks_mqd, "Tasks", getpid());
     test_mqdes(results_mqd, "Results", getpid());
 #endif
-
     // Implement Phase 1 here
 
+    struct task classify;
+    classify.task_type = TASK_CLASSIFY;
+    classify.task_cluster = 0;
+    for (int i = num_clusters; i > 0; i--) {
+        if (mq_send(tasks_mqd, (const char *) &classify, sizeof(classify), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+        return 1;
+        }
+        classify.task_cluster++;
+        num_clusters--;
+    }
+
+    
+  
+
+
+    
 
     
 
@@ -234,6 +250,24 @@ int main(int argc, char *argv[])
 #endif
 
     // Implement Phase 3 here
-
+    // generate a terminate task for each process
+    struct task terminate;
+    terminate.task_type = TASK_TERMINATE;
+    for (int i = NUM_PROCESSES; i > 0; i--) {
+        // send to tasks queue
+        if (mq_send(tasks_mqd, (const char *) &terminate, sizeof(terminate), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;
+        }
+    }
+    //wait for children to terminate
+    wait(NULL);
+    //close any open mqds
+    mq_close(tasks_mqd);
+    mq_close(results_mqd);
+    //unlink mqueues
+    //mq_unlink(tasks_mq_name);
+    //mq_unlink(results_mq_name);
+    //terminates itself
     return 0;
 };
