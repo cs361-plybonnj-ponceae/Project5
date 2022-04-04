@@ -80,7 +80,7 @@ int main(int argc, char *argv[])
             // Here you need to create/open the two message queues for the
             // worker process. You must use the tasks_mqd and results_mqd
             // variables for this purpose
-            if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT | O_NONBLOCK, 0600, &attributes)) < 0) {
+            if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
                 printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
                 return 1;
             }
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
                         if (mq_send(results_mqd, (const char *) &result, sizeof(result), 0) < 0) {
                             printf("Error sending to results queue: %s\n", strerror(errno));
                             return 1;
-                        }
+                        } 
                         break;
 
                     case TASK_MAP:
@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
     // Here you need to create/open the two message queues for the
     // supervisor process. You must use the tasks_mqd and results_mqd
     // variables for this purpose
-    if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT | O_NONBLOCK, 0600, &attributes)) < 0) {
+    if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
         return 1;
     }
@@ -206,26 +206,24 @@ int main(int argc, char *argv[])
 #endif
     // Implement Phase 1 here
 
-    struct task classify;
-    classify.task_type = TASK_CLASSIFY;
-    classify.task_cluster = 0;
-    for (int i = num_clusters; i > 0; i--) {
-        if (mq_send(tasks_mqd, (const char *) &classify, sizeof(classify), 0) < 0) {
-            printf("Error sending to tasks queue: %s\n", strerror(errno));
-        return 1;
-        }
-        classify.task_cluster++;
-        num_clusters--;
-    }
-
-    
-  
-
-
-    
-
-    
-
+    // struct task classify;
+    // classify.task_type = TASK_CLASSIFY;
+    // classify.task_cluster = 0;
+    // for (int i = num_clusters; i > 0; i--) {
+    //     if (mq_send(tasks_mqd, (const char *) &classify, sizeof(classify), 0) < 0) {
+    //         if (errno == EAGAIN) {
+    //             char recv_buffer[MESSAGE_SIZE_MAX];
+    //             if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
+    //                 printf("Error receiving message from results queue: %s\n", strerror(errno));
+    //                 return 1;
+    //             } 
+    //         }
+    //         printf("Error sending to tasks queue: %s\n", strerror(errno));
+    //     return 1;   
+    //     }
+    //     classify.task_cluster++;
+    //     num_clusters--;
+    // }
     // End of Phase 1
 
 #ifdef GRADING // do not delete this or you will lose points
@@ -266,8 +264,8 @@ int main(int argc, char *argv[])
     mq_close(tasks_mqd);
     mq_close(results_mqd);
     //unlink mqueues
-    //mq_unlink(tasks_mq_name);
-    //mq_unlink(results_mq_name);
+    mq_unlink(tasks_mq_name);
+    mq_unlink(results_mq_name);
     //terminates itself
     return 0;
 };
