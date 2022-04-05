@@ -16,7 +16,7 @@ Honor code statement: This code complies with the JMU Honor Code.
 #include <mqueue.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-
+#include <assert.h>
 #include "common.h"
 #include "classify.h"
 #include "intqueue.h"
@@ -27,6 +27,7 @@ Honor code statement: This code complies with the JMU Honor Code.
 int main(int argc, char *argv[])
 {
     int input_fd;
+    int classification_fd;
     pid_t pid;
     off_t file_size;
     mqd_t tasks_mqd, results_mqd; // message queue descriptors
@@ -39,7 +40,6 @@ int main(int argc, char *argv[])
     attributes.mq_maxmsg = 1000;
     attributes.mq_msgsize = MESSAGE_SIZE_MAX;
     attributes.mq_curmsgs = 0;
-
     if (argc != 2) {
         printf("Usage: %s data_file\n", argv[0]);
         return 1;
@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
                 if (mq_receive(tasks_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
                     printf("Error receiving message from %s: %s\n", tasks_mq_name, strerror(errno));
                     return 1;
-                }      
+                }     
                 // cast the received message to a struct task
                 my_task = (struct task *)recv_buffer;
                 switch (my_task->task_type) {
@@ -111,44 +111,47 @@ int main(int argc, char *argv[])
                         // you must retrieve the data for the specified cluster
                         // and store it in cluster_data before executing the
                         // code below
-
+                        input_fd = open(argv[1], O_RDONLY);
+                        if (input_fd < 0) {
+                            printf("Error opening file \"%s\" for reading: %s\n", argv[1], strerror(errno));
+                            return 1;
+                        }
                         // seek to the specified cluster in the input file
-                        lseek(input_fd, CLUSTER_SIZE, SEEK_CUR);
-
+                        lseek(input_fd, my_task->task_cluster * CLUSTER_SIZE, SEEK_SET);
                         // read the cluster data 
                         read(input_fd, &cluster_data, CLUSTER_SIZE);
-
-                        // Classification code
-                        classification = TYPE_UNCLASSIFIED;
-                        if (has_jpg_body(cluster_data))
-                            classification |= TYPE_IS_JPG;
-                        if (has_jpg_header(cluster_data))
-                            classification |= TYPE_JPG_HEADER | TYPE_IS_JPG;
-                        if (has_jpg_footer(cluster_data))
-                            classification |= TYPE_JPG_FOOTER | TYPE_IS_JPG;
-                        // In the below statement, none of the JPG types were set, so
-                        // the cluster must be HTML
-                        if (classification == TYPE_UNCLASSIFIED) {
-                            if (has_html_body(cluster_data))
-                                classification |= TYPE_IS_HTML;
-                            if (has_html_header(cluster_data))
-                                classification |= TYPE_HTML_HEADER | TYPE_IS_HTML;
-                            if (has_html_footer(cluster_data))
-                                classification |= TYPE_HTML_FOOTER | TYPE_IS_HTML;
-                        }
-                        if (classification == TYPE_UNCLASSIFIED)
-                            classification = TYPE_UNKNOWN;
-
+                            classification = TYPE_UNCLASSIFIED;
+                            if (has_jpg_body(cluster_data)) {
+                                classification |= TYPE_IS_JPG;
+                            }
+                            if (has_jpg_header(cluster_data)) {
+                                classification |= TYPE_JPG_HEADER | TYPE_IS_JPG;
+                            }
+                            if (has_jpg_footer(cluster_data)) {
+                                classification |= TYPE_JPG_FOOTER | TYPE_IS_JPG;
+                            }
+                            // In the below statement, none of the JPG types were set, so
+                            // the cluster must be HTML
+                            if (classification == TYPE_UNCLASSIFIED) {
+                                if (has_html_body(cluster_data)) {
+                                    classification |= TYPE_IS_HTML;
+                                }
+                                if (has_html_header(cluster_data)) {
+                                    classification |= TYPE_HTML_HEADER | TYPE_IS_HTML;
+                                }
+                                if (has_html_footer(cluster_data)) {
+                                    classification |= TYPE_HTML_FOOTER | TYPE_IS_HTML;
+                                }
+                            }
+                            if (classification == TYPE_UNCLASSIFIED) {
+                                classification = TYPE_UNKNOWN;
+                            }                                
                         // generate the classification message (struct result) and send to result queue
                         struct result result;
                         result.res_cluster_number = my_task->task_cluster;
                         result.res_cluster_type = classification;
-                        printf("cluster number:%d cluster type:%d\n", result.res_cluster_number, result.res_cluster_type);
                         // send it to results queue
-                        if (mq_send(results_mqd, (const char *) &result, sizeof(result), 0) < 0) {
-                            printf("Error sending to results queue: %s\n", strerror(errno));
-                            return 1;
-                        } 
+                        
                         break;
 
                     case TASK_MAP:
@@ -156,10 +159,16 @@ int main(int argc, char *argv[])
 #ifdef GRADING // do not delete this or you will lose points
                         printf("(%d): received TASK_MAP\n", getpid());
 #endif
-
                         // implement the map task logic here
+                        classification_fd = open(CLASSIFICATION_FILE, O_WRONLY | O_CREAT, 0600);
+                        if (classification_fd < 0) {
+                            printf("Error opening %s for reading: %s\n", CLASSIFICATION_FILE, strerror(errno));
+                            return 1;
+                        }
 
+                    
 
+                        
                         break;
 
                     default:
@@ -170,8 +179,6 @@ int main(int argc, char *argv[])
                         // implement the terminate task logic here
                         mq_close(tasks_mqd);
                         mq_close(results_mqd);
-                        printf("TERMINATE\n");
-
                         exit(0);
                 }
             }
@@ -206,38 +213,35 @@ int main(int argc, char *argv[])
 #endif
     // Implement Phase 1 here
 
-    // struct task classify;
-    // classify.task_type = TASK_CLASSIFY;
-    // classify.task_cluster = 0;
-    // for (int i = num_clusters; i > 0; i--) {
-    //     if (mq_send(tasks_mqd, (const char *) &classify, sizeof(classify), 0) < 0) {
-    //         if (errno == EAGAIN) {
-    //             char recv_buffer[MESSAGE_SIZE_MAX];
-    //             if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
-    //                 printf("Error receiving message from results queue: %s\n", strerror(errno));
-    //                 return 1;
-    //             } 
-    //         }
-    //         printf("Error sending to tasks queue: %s\n", strerror(errno));
-    //     return 1;   
-    //     }
-    //     classify.task_cluster++;
-    //     num_clusters--;
-    // }
+    struct task classify;
+    classify.task_type = TASK_CLASSIFY;
+    classify.task_cluster = 0;
+    for (int i = num_clusters; i > 0; i--) {
+        if (mq_send(tasks_mqd, (const char *) &classify, sizeof(classify), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;   
+        }
+        classify.task_cluster++;
+        num_clusters--;
+    }
     // End of Phase 1
 
 #ifdef GRADING // do not delete this or you will lose points
     printf("(%d): Starting Phase 2\n", getpid());
 #endif
-
-    // Here you need to swtich the tasks queue to blocking
-
+    // Here you need to switch the tasks queue to blocking
+    struct mq_attr newattributes;
+    newattributes.mq_flags = 0;
+    newattributes.mq_maxmsg = 1000;
+    newattributes.mq_msgsize = MESSAGE_SIZE_MAX;
+    newattributes.mq_curmsgs = 0;
+    mq_setattr(tasks_mqd, &newattributes, &attributes);
 #ifdef GRADING // do not delete this or you will lose points
     test_mqdes(tasks_mqd, "Tasks", getpid());
 #endif
-
-
     // Implement Phase 2 here
+    struct task map;
+    classify.task_type = TASK_MAP;
 
 
 
