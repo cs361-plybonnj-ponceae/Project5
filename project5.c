@@ -51,6 +51,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    classification_fd = open(CLASSIFICATION_FILE, O_RDWR | O_CREAT, 0600);
+    if (classification_fd < 0) {
+        printf("Error opening %s for reading: %s\n", CLASSIFICATION_FILE, strerror(errno));
+        return 1;
+    }   
     // Determine the file size of the input file
     file_size = lseek(input_fd, 0, SEEK_END);
     close(input_fd);
@@ -151,7 +156,7 @@ int main(int argc, char *argv[])
                         result.res_cluster_number = my_task->task_cluster;
                         result.res_cluster_type = classification;
                         // send it to results queue
-                        printf("Cluster number %d Cluster type %d\n", result.res_cluster_number, result.res_cluster_type);
+                        //printf("Cluster number %d Cluster type %d\n", result.res_cluster_number, result.res_cluster_type);
                         if (mq_send(results_mqd, (const char *) &result, sizeof(result), 0) < 0) {
                             if (errno == EAGAIN) {
                                 //RESEND
@@ -168,11 +173,7 @@ int main(int argc, char *argv[])
                         printf("(%d): received TASK_MAP\n", getpid());
 #endif
                         // implement the map task logic here
-                        classification_fd = open(CLASSIFICATION_FILE, O_WRONLY | O_CREAT, 0600);
-                        if (classification_fd < 0) {
-                            printf("Error opening %s for reading: %s\n", CLASSIFICATION_FILE, strerror(errno));
-                            return 1;
-                        }              
+               
                         break;
 
                     default:
@@ -237,30 +238,22 @@ int main(int argc, char *argv[])
         // keep receiving a task until all clusters have been received
         while (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) != -1 && num_clusters != 0) {
             struct result *result;
-            result = (struct result *)recv_buffer;
-            // open classification file for writing
-            classification_fd = open(CLASSIFICATION_FILE, O_WRONLY | O_CREAT, 0600);
-            if (classification_fd < 0) {
-                printf("Error opening %s for reading: %s\n", CLASSIFICATION_FILE, strerror(errno));
-                return 1;
-            } 
-            
+            result = (struct result *)recv_buffer;     
             // seek to location in classification file specified by res_cluster_number
             lseek(classification_fd, result->res_cluster_number, SEEK_SET);
             // write the classification type to the location
             write(classification_fd, &result->res_cluster_type, 1);
-
-
-            
-            printf("%d %d %d\n", result->res_cluster_type, TYPE_HTML_HEADER | TYPE_IS_HTML, TYPE_JPG_HEADER | TYPE_IS_JPG); 
-
+            // if classification type is a header, save the cluster number in a queue for use in Phase 2.
+            if (result->res_cluster_type & TYPE_HTML_HEADER) {
+                enqueue(&headerq, result->res_cluster_number);
+            } else if (result->res_cluster_type & TYPE_JPG_HEADER) {
+                enqueue(&headerq, result->res_cluster_number);
+            }            
             if (num_clusters == 1) {
                 break;
             }
             num_clusters--;   
-
         }    
-  
 
     // End of Phase 1
 
@@ -278,11 +271,31 @@ int main(int argc, char *argv[])
     test_mqdes(tasks_mqd, "Tasks", getpid());
 #endif
     // Implement Phase 2 here
-    struct task map;
-    classify.task_type = TASK_MAP;
+    int cluster_number;
+    char filename[13] = "file0000.";
+    while(isempty(&headerq) != 1) {
+        cluster_number = dequeue(&headerq);
+        lseek(classification_fd, cluster_number, SEEK_SET);
+        unsigned char type;
+        read(classification_fd, &type, 1);
+        printf("Type %d %d\n", type, type == (TYPE_HTML_HEADER + TYPE_IS_HTML));
 
-
-
+        if ((type == (TYPE_HTML_HEADER | TYPE_IS_HTML)) == 1) {
+            char * htm = "htm";
+            strncat(filename, htm, 3);
+        } else {
+            char * jpg = "jpg";
+            strncat(filename, jpg, 3);
+        }
+        struct task map;
+        map.task_type = TASK_MAP;
+        strncpy(map.task_filename, filename, 12);
+        printf("%s\n", map.task_filename);
+        if (mq_send(tasks_mqd, (const char *) &map, sizeof(map), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;   
+        }
+    }
     // End of Phase 2
 
 #ifdef GRADING // do not delete this or you will lose points
