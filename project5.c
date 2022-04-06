@@ -20,6 +20,8 @@ Honor code statement: This code complies with the JMU Honor Code.
 #include "common.h"
 #include "classify.h"
 #include "intqueue.h"
+#include <stdbool.h>
+#include <stdint.h>
 #ifdef GRADING // do not delete this or the next two lines
 #include "gradelib.h"
 #endif
@@ -28,6 +30,7 @@ int main(int argc, char *argv[])
 {
     int input_fd;
     int classification_fd;
+    int map_fd;
     pid_t pid;
     off_t file_size;
     mqd_t tasks_mqd, results_mqd; // message queue descriptors
@@ -173,7 +176,25 @@ int main(int argc, char *argv[])
                         printf("(%d): received TASK_MAP\n", getpid());
 #endif
                         // implement the map task logic here
-               
+
+                        // seek to the specified cluster in the classification file
+                        lseek(classification_fd, my_task->task_cluster, SEEK_SET);
+                        map_fd = open(MAP_FILE, O_WRONLY | O_CREAT, 0600);
+                        if (map_fd < 0) {
+                            printf("Error opening map file");
+                            return 1;
+                        }
+
+                        uint32_t cluster_count = 0; 
+                                       
+                        for (int i = my_task->task_cluster; i < num_clusters; i++) {
+                            unsigned char type;
+                            read(classification_fd, &type, 1);
+                       
+                            write(map_fd, my_task->task_filename, 12);
+                            write(map_fd, &cluster_count, 4);
+                            cluster_count++;                             
+                        }
                         break;
 
                     default:
@@ -272,25 +293,23 @@ int main(int argc, char *argv[])
 #endif
     // Implement Phase 2 here
     int cluster_number;
-    char filename[13] = "file0000.";
     while(isempty(&headerq) != 1) {
+        char filename[13] = "file0000.";
         cluster_number = dequeue(&headerq);
         lseek(classification_fd, cluster_number, SEEK_SET);
         unsigned char type;
         read(classification_fd, &type, 1);
-        printf("Type %d %d\n", type, type == (TYPE_HTML_HEADER + TYPE_IS_HTML));
-
-        if ((type == (TYPE_HTML_HEADER | TYPE_IS_HTML)) == 1) {
+        if (type & TYPE_HTML_HEADER) {
             char * htm = "htm";
             strncat(filename, htm, 3);
-        } else {
+        } else {     
             char * jpg = "jpg";
             strncat(filename, jpg, 3);
         }
         struct task map;
         map.task_type = TASK_MAP;
+        map.task_cluster = cluster_number;
         strncpy(map.task_filename, filename, 12);
-        printf("%s\n", map.task_filename);
         if (mq_send(tasks_mqd, (const char *) &map, sizeof(map), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;   
